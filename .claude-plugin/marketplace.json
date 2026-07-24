@@ -1,0 +1,13 @@
+{
+  "name": "gladstomych",
+  "owner": {
+    "name": "gladstomych"
+  },
+  "plugins": [
+    {
+      "name": "sensitive-canary",
+      "source": "./",
+      "description": "Blocks secrets before they reach the Anthropic API. Fork of coo-quack/sensitive-canary: PII rules removed (secrets only), command-text and $VAR checks relaxed to echo-into-context patterns."
+    }
+  ]
+}

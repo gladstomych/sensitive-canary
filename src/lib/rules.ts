@@ -232,57 +232,14 @@ const SECRET_RULES: Rule[] = [
 
 // ── PII ───────────────────────────────────────────────────────────────────────
 
-const PII_RULES: Rule[] = [
-  {
-    id: "pii-email",
-    description: "Email Address",
-    regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
-    category: "pii",
-  },
-  {
-    id: "pii-credit-card",
-    description: "Credit Card Number",
-    // Visa (16d) | Mastercard (16d) | Amex (15d) | Discover (16d)
-    // Optional spaces or dashes between digit groups
-    regex:
-      /\b(?:4[0-9]{3}(?:[\s-]?[0-9]{4}){3}|5[1-5][0-9]{2}(?:[\s-]?[0-9]{4}){3}|3[47][0-9]{2}[\s-]?[0-9]{6}[\s-]?[0-9]{5}|6(?:011|5[0-9]{2})[0-9](?:[\s-]?[0-9]{4}){3})\b/g,
-    validate: luhn,
-    category: "pii",
-  },
-  {
-    id: "pii-ssn",
-    description: "US Social Security Number",
-    regex: /\b(?!000|666|9\d{2})\d{3}[- ](?!00)\d{2}[- ](?!0000)\d{4}\b/g,
-    category: "pii",
-  },
-  {
-    id: "pii-phone-us",
-    description: "US Phone Number",
-    regex: /\b(\+1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g,
-    category: "pii",
-  },
-  {
-    id: "pii-phone-jp",
-    description: "Japanese Phone Number",
-    regex: /\b0\d{1,4}[\s-]\d{1,4}[\s-]\d{4}\b/g,
-    category: "pii",
-  },
-  {
-    id: "pii-postal-jp",
-    description: "Japanese Postal Code",
-    // Require 〒 prefix to avoid false positives (e.g. phone number fragments)
-    regex: /〒\d{3}[\s-]\d{4}/g,
-    category: "pii",
-  },
-  {
-    id: "pii-ipv4",
-    description: "IPv4 Address (private range)",
-    // Only flag RFC-1918 private addresses to reduce noise
-    regex:
-      /\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/g,
-    category: "pii",
-  },
-];
+// FORK (gladstomych): the PII rules are gone. This canary guards secrets —
+// API keys, passwords, connection strings. The upstream PII set (email, US/JP
+// phone, SSN, credit card, JP postal, private IPv4) was regex-only and earned
+// its keep in false positives, not catches: emails and RFC-1918 addresses are
+// routine dev data, and the phone/SSN shapes match arbitrary digit runs.
+// The "pii" category and its allow/mask-tag plumbing remain so per-category
+// tags keep parsing and upstream merges stay small.
+const PII_RULES: Rule[] = [];
 
 export const RULES: Rule[] = [...SECRET_RULES, ...PII_RULES];
 
@@ -292,10 +249,14 @@ export function redact(str: string): string {
   return `${str.slice(0, 4)}****${str.slice(-4)}`;
 }
 
-export function scan(text: string): Finding[] {
+// LOCAL PATCH: excludeRuleIds lets callers skip rules that are known to
+// false-positive in their context (e.g. generic assignment patterns matching
+// grep regexes inside bash command text).
+export function scan(text: string, excludeRuleIds?: Set<string>): Finding[] {
   const findings: Finding[] = [];
 
   for (const rule of RULES) {
+    if (excludeRuleIds?.has(rule.id)) continue;
     for (const match of text.matchAll(rule.regex)) {
       const secretValue =
         rule.secretGroup != null ? match[rule.secretGroup] : match[0];

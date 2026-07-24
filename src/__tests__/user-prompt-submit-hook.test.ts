@@ -39,10 +39,6 @@ describe("user-prompt-submit-hook — allow (exit 0)", () => {
     expect(exitCode).toBe(0);
   });
 
-  it("passes with [allow-pii] tag when only PII is present", () => {
-    const { exitCode } = runHook("[allow-pii] please email user@example.com");
-    expect(exitCode).toBe(0);
-  });
 });
 
 describe("user-prompt-submit-hook — block (exit 2)", () => {
@@ -61,36 +57,17 @@ describe("user-prompt-submit-hook — block (exit 2)", () => {
     expect(stderr).toContain("jwt");
   });
 
-  it("blocks a prompt with an email address", () => {
-    const { exitCode, stderr } = runHook("please email user@example.com");
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain("pii-email");
-  });
-
-  it("blocks a prompt with a credit card number", () => {
-    const { exitCode, stderr } = runHook("card: 4111111111111111");
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain("pii-credit-card");
+  // FORK (gladstomych): the PII rules are gone; ex-PII content passes.
+  it("passes a prompt with emails, cards, and private IPs", () => {
+    const { exitCode } = runHook(
+      "email user@example.com card: 4111111111111111 host: 192.168.1.1",
+    );
+    expect(exitCode).toBe(0);
   });
 
   it("shows [allow-secret] and [allow-all] hints for a secret", () => {
     const { stderr } = runHook("key=AKIAIOSFODNN7EXAMPLE");
     expect(stderr).toContain("[allow-secret]");
-    expect(stderr).toContain("[allow-all]");
-  });
-
-  it("shows [allow-pii] and [allow-all] hints for PII", () => {
-    const { stderr } = runHook("email: user@example.com");
-    expect(stderr).toContain("[allow-pii]");
-    expect(stderr).toContain("[allow-all]");
-  });
-
-  it("shows both [allow-secret] and [allow-pii] hints when both are detected", () => {
-    const { stderr } = runHook(
-      "key=AKIAIOSFODNN7EXAMPLE and email user@example.com",
-    );
-    expect(stderr).toContain("[allow-secret]");
-    expect(stderr).toContain("[allow-pii]");
     expect(stderr).toContain("[allow-all]");
   });
 
@@ -106,19 +83,6 @@ describe("user-prompt-submit-hook — block (exit 2)", () => {
     expect(exitCode).toBe(2);
   });
 
-  it("[allow-secret] does not bypass a PII block", () => {
-    const { exitCode } = runHook(
-      "[allow-secret] please email user@example.com",
-    );
-    expect(exitCode).toBe(2);
-  });
-
-  it("[allow-secret] with mixed content still blocks PII", () => {
-    const { exitCode } = runHook(
-      "[allow-secret] key=AKIAIOSFODNN7EXAMPLE and email user@example.com",
-    );
-    expect(exitCode).toBe(2);
-  });
 });
 
 describe("user-prompt-submit-hook — [mask-xxx] tags", () => {
@@ -132,16 +96,6 @@ describe("user-prompt-submit-hook — [mask-xxx] tags", () => {
     expect(stderr).toContain("[allow-secret]");
   });
 
-  it("[mask-pii] with PII shows the actual tag in message", () => {
-    const { exitCode, stderr } = runHook(
-      "[mask-pii] please email user@example.com",
-    );
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain("prompt masking is not supported");
-    expect(stderr).toContain("[mask-pii]");
-    expect(stderr).toContain("[allow-pii]");
-  });
-
   it("[mask-all] with any sensitive data shows masking not supported", () => {
     const { exitCode, stderr } = runHook(
       "[mask-all] my key is AKIAIOSFODNN7EXAMPLE",
@@ -149,15 +103,6 @@ describe("user-prompt-submit-hook — [mask-xxx] tags", () => {
     expect(exitCode).toBe(2);
     expect(stderr).toContain("prompt masking is not supported");
     expect(stderr).toContain("[mask-all]");
-  });
-
-  it("[mask-secret] with only PII falls through to normal block", () => {
-    const { exitCode, stderr } = runHook(
-      "[mask-secret] please email user@example.com",
-    );
-    expect(exitCode).toBe(2);
-    expect(stderr).not.toContain("prompt masking is not supported");
-    expect(stderr).toContain("sensitive data detected");
   });
 
   it("[mask-pii] with only secrets falls through to normal block", () => {
@@ -213,25 +158,6 @@ describe("user-prompt-submit-hook — first-occurrence tag priority", () => {
     );
     expect(exitCode).toBe(2);
     expect(stderr).toContain("prompt masking is not supported");
-  });
-
-  it("[allow-secret] [mask-pii] → secret allowed, pii masked → masking not supported (exit 2)", () => {
-    const { exitCode, stderr } = runHook(
-      "[allow-secret] [mask-pii] key AKIAIOSFODNN7EXAMPLE email user@example.com",
-    );
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain("prompt masking is not supported");
-    expect(stderr).toContain("[mask-pii]");
-    expect(stderr).not.toContain("[mask-secret]");
-  });
-
-  it("[mask-pii] [allow-secret] → secret: allow, pii: mask → masking not supported for email (exit 2)", () => {
-    const { exitCode, stderr } = runHook(
-      "[mask-pii] [allow-secret] key AKIAIOSFODNN7EXAMPLE email user@example.com",
-    );
-    expect(exitCode).toBe(2);
-    expect(stderr).toContain("prompt masking is not supported");
-    expect(stderr).toContain("[mask-pii]");
   });
 
   it("[allow-pii] before [mask-pii] → pii allowed, secret still blocked (exit 2)", () => {

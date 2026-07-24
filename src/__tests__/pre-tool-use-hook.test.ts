@@ -200,18 +200,14 @@ describe("pre-tool-use-hook — sensitive content blocking", () => {
     expect(reason).toContain("aws-access-key");
   });
 
-  it("blocks a file containing an email address", () => {
-    const p = writeFixture("contacts.txt", "Email: user@example.com\n");
-    const { exitCode, decision } = runHook("Read", p);
-    expect(exitCode).toBe(2);
-    expect(decision).toBe("block");
-  });
-
-  it("blocks a file containing a private IP", () => {
-    const p = writeFixture("infra.txt", "server: 192.168.1.100\n");
-    const { exitCode, decision } = runHook("Read", p);
-    expect(exitCode).toBe(2);
-    expect(decision).toBe("block");
+  // FORK (gladstomych): the PII rules are gone; ex-PII content passes.
+  it("passes a file containing only emails and private IPs", () => {
+    const p = writeFixture(
+      "contacts.txt",
+      "Email: user@example.com\nserver: 192.168.1.100\n",
+    );
+    const { exitCode } = runHook("Read", p);
+    expect(exitCode).toBe(0);
   });
 
   it("includes [allow-secret] and [allow-all] hints in reason for a secret", () => {
@@ -225,13 +221,6 @@ describe("pre-tool-use-hook — sensitive content blocking", () => {
     const p = writeFixture("bird.txt", "key=AKIAIOSFODNN7EXAMPLE\n");
     const { reason } = runHook("Read", p);
     expect(reason).toMatch(/[🐦🐧🐤🐔]/u);
-  });
-
-  it("includes [allow-pii] and [allow-all] hints in reason for PII", () => {
-    const p = writeFixture("pii.txt", "Email: user@example.com\n");
-    const { reason } = runHook("Read", p);
-    expect(reason).toContain("[allow-pii]");
-    expect(reason).toContain("[allow-all]");
   });
 
   it("deduplicates repeated secrets — finding line appears only once", () => {
@@ -331,13 +320,22 @@ describe("pre-tool-use-hook — Bash tool (env var expansion)", () => {
     expect(reason).toContain("aws-access-key");
   });
 
+  // FORK (gladstomych): $VAR values are only checked in echo/printf segments —
+  // credential *use* (curl, python, ...) is allowed; printing into context is not.
   // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional literal — testing ${VAR} bash syntax
-  it("blocks ${TOKEN} brace syntax", () => {
+  it("blocks echo of ${TOKEN} brace syntax", () => {
     // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional literal — the string is passed as a bash command
-    const { exitCode } = runBashHook("curl -H 'Auth: ${API_TOKEN}'", {
+    const { exitCode } = runBashHook('echo "Auth: ${API_TOKEN}"', {
       env: { API_TOKEN: "AKIAIOSFODNN7EXAMPLE" },
     });
     expect(exitCode).toBe(2);
+  });
+
+  it("allows curl using $API_TOKEN (credential use, not echo)", () => {
+    const { exitCode } = runBashHook("curl -H 'Auth: $API_TOKEN' https://x", {
+      env: { API_TOKEN: "AKIAIOSFODNN7EXAMPLE" },
+    });
+    expect(exitCode).toBe(0);
   });
 
   it("allows echo $TOKEN when TOKEN value is clean", () => {
@@ -404,11 +402,11 @@ describe("pre-tool-use-hook — Bash tool (file-reading commands)", () => {
     expect(decision).toBe("block");
   });
 
-  it("blocks cat on a file with PII", () => {
+  // FORK (gladstomych): the PII rules are gone; ex-PII content passes.
+  it("passes cat on a file with only ex-PII content", () => {
     const p = writeFixture("contacts-bash.txt", "Email: user@example.com\n");
-    const { exitCode, decision } = runBashHook(`cat ${p}`);
-    expect(exitCode).toBe(2);
-    expect(decision).toBe("block");
+    const { exitCode } = runBashHook(`cat ${p}`);
+    expect(exitCode).toBe(0);
   });
 
   it("allows cat on a clean file", () => {
@@ -486,13 +484,6 @@ describe("pre-tool-use-hook — allow tag bypass via transcript", () => {
       "config-allow-secret2.txt",
       "key=AKIAIOSFODNN7EXAMPLE\n",
     );
-    const { exitCode } = runHook("Read", p, { transcriptPath: transcript });
-    expect(exitCode).toBe(0);
-  });
-
-  it("[allow-pii] bypasses PII in content scan", () => {
-    const transcript = writeTranscript(["[allow-pii] ok"]);
-    const p = writeFixture("pii-allow.txt", "email=user@example.com\n");
     const { exitCode } = runHook("Read", p, { transcriptPath: transcript });
     expect(exitCode).toBe(0);
   });
@@ -646,19 +637,6 @@ describe("pre-tool-use-hook — allow tag single-use (consumed by first tool cal
     expect(decision).toBe("block");
   });
 
-  it("[allow-pii] is consumed after a tool_result", () => {
-    const transcript = writeTranscriptWithToolResults([
-      { text: "[allow-pii] read the contacts" },
-      { toolResult: "previous tool output" },
-    ]);
-    const p = writeFixture("pii-consumed.txt", "email=user@example.com\n");
-    const { exitCode, decision } = runHook("Read", p, {
-      transcriptPath: transcript,
-    });
-    expect(exitCode).toBe(2);
-    expect(decision).toBe("block");
-  });
-
   it("blocks when latest real user message has no allow tag despite earlier allow", () => {
     const transcript = writeTranscriptWithToolResults([
       { text: "[allow-all] read everything" },
@@ -709,5 +687,59 @@ describe("pre-tool-use-hook — malformed input", () => {
       encoding: "utf8",
     });
     expect(result.status).toBe(0);
+  });
+});
+
+// ── FORK (gladstomych) loosenings ─────────────────────────────────────────────
+
+describe("pre-tool-use-hook — fork loosenings", () => {
+  it("passes Read of .env.example with placeholder content", () => {
+    const p = writeFixture(".env.example", "API_KEY=changeme\nDEBUG=true\n");
+    const { exitCode } = runHook("Read", p);
+    expect(exitCode).toBe(0);
+  });
+
+  it("still blocks .env.example whose content holds a real secret", () => {
+    const p = writeFixture(".env.example", "API_KEY=AKIAIOSFODNN7EXAMPLE\n");
+    const { exitCode, decision } = runHook("Read", p);
+    expect(exitCode).toBe(2);
+    expect(decision).toBe("block");
+  });
+
+  it("still blocks .env.local by name alone", () => {
+    const p = writeFixture(".env.local", "DEBUG=true\n");
+    const { exitCode, decision } = runHook("Read", p);
+    expect(exitCode).toBe(2);
+    expect(decision).toBe("block");
+  });
+
+  it("allows a localhost connection string in command text", () => {
+    const { exitCode } = runBashHook(
+      "psql postgres://postgres:postgres@localhost:5432/mydb",
+    );
+    expect(exitCode).toBe(0);
+  });
+
+  it("allows a 127.0.0.1 connection string in command text", () => {
+    const { exitCode } = runBashHook(
+      "redis-cli -u redis://user:pass@127.0.0.1:6379/0 ping",
+    );
+    expect(exitCode).toBe(0);
+  });
+
+  it("blocks a remote connection string in command text", () => {
+    const { exitCode, decision } = runBashHook(
+      "psql postgres://admin:hunter2@db.prod.example.com:5432/app",
+    );
+    expect(exitCode).toBe(2);
+    expect(decision).toBe("block");
+  });
+
+  it("is not fooled by localhost.evil.com", () => {
+    const { exitCode, decision } = runBashHook(
+      "psql postgres://admin:hunter2@localhost.evil.com:5432/app",
+    );
+    expect(exitCode).toBe(2);
+    expect(decision).toBe("block");
   });
 });

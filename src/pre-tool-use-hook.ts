@@ -107,12 +107,24 @@ const FILE_READ_COMMANDS = new Set([
   "nl",
 ]);
 
+// LOCAL PATCH: commands whose output lands directly in the conversation and
+// whose arguments are the payload. $VAR references are only checked inside
+// these segments — `curl -H "x: $TOKEN"` or `API_KEY=$KEY python app.py` is
+// legitimate credential *use*; `echo $TOKEN` prints it into context.
+const CONTEXT_ECHO_COMMANDS = new Set(["echo", "printf"]);
+
 function extractEnvVarNames(command: string): string[] {
   const names = new Set<string>();
   const re = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-  for (const match of command.matchAll(re)) {
-    const name = match[1] ?? match[2];
-    if (name) names.add(name);
+
+  for (const seg of command.split(/\s*[|;&]+\s*/)) {
+    const tokens = seg.trim().split(/\s+/).filter(Boolean);
+    const cmd = path.basename(tokens[0] ?? "");
+    if (!CONTEXT_ECHO_COMMANDS.has(cmd)) continue;
+    for (const match of seg.matchAll(re)) {
+      const name = match[1] ?? match[2];
+      if (name) names.add(name);
+    }
   }
   return [...names];
 }
@@ -152,10 +164,33 @@ function extractFilePathsFromCommand(command: string): string[] {
 
 // .env and .env.* (e.g. .env.local, .env.production) are blocked unconditionally.
 // Files that merely end in .env (e.g. production.env) are handled by content scanning.
+// FORK (gladstomych): placeholder files (.env.example and friends) carry no real
+// secrets by convention and are how a project documents its config surface, so
+// they skip the name block. Content scanning still applies to them.
+const ENV_NAME_EXEMPT = new Set([".env.example", ".env.sample", ".env.template"]);
+
 function isBlockedEnvFile(filePath: string): boolean {
   if (!filePath) return false;
   const base = path.basename(filePath);
+  if (ENV_NAME_EXEMPT.has(base)) return false;
   return base === ".env" || base.startsWith(".env.");
+}
+
+// FORK (gladstomych): connection strings aimed at the local machine are dev
+// plumbing (postgres://postgres:postgres@localhost/db), not leaks. Command
+// text only; file contents keep the full rule. The lookahead stops
+// localhost.evil.com from passing as local.
+const LOCAL_HOST_RE = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?=[:/\s]|$)/;
+
+function isLocalConnectionString(command: string, finding: Finding): boolean {
+  if (finding.ruleId !== "connection-string") return false;
+  let idx = command.indexOf(finding.secretValue);
+  while (idx !== -1) {
+    const after = command.slice(idx + finding.secretValue.length);
+    if (!LOCAL_HOST_RE.test(after)) return false;
+    idx = command.indexOf(finding.secretValue, idx + finding.secretValue.length);
+  }
+  return true;
 }
 
 // ── Output helpers ────────────────────────────────────────────────────────────
@@ -321,10 +356,19 @@ process.stdin.on("end", () => {
       );
     }
 
+    // LOCAL PATCH: skip the generic assignment rules on command *text*. They
+    // false-positive on grep/sed patterns like '^API_KEY=adr_(live|...)' and
+    // on `TOKEN=$(...)` captures, and any literal in the command is already in
+    // the conversation before this hook runs. Specific token formats (AWS,
+    // GitHub, etc.) still apply, and file *contents* keep the full rule set.
+    const COMMAND_TEXT_EXCLUDED_RULES = new Set([
+      "env-assignment",
+      "generic-secret",
+    ]);
     const cmdFindings = applyAllowTags(
-      dedupeFindings(scan(command)),
+      dedupeFindings(scan(command, COMMAND_TEXT_EXCLUDED_RULES)),
       allowTags,
-    );
+    ).filter((f) => !isLocalConnectionString(command, f));
     if (cmdFindings.length > 0) {
       block(
         `bash command: ${command.slice(0, 80)}`,

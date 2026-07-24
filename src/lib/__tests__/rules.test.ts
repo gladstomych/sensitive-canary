@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entropy, luhn, redact, scan } from "../rules.ts";
+import { entropy, luhn, redact, RULES, scan } from "../rules.ts";
 
 // ── luhn ──────────────────────────────────────────────────────────────────────
 
@@ -231,122 +231,39 @@ describe("scan — secrets", () => {
   });
 });
 
-// ── scan: PII ─────────────────────────────────────────────────────────────────
+// ── scan: PII (removed in fork) ───────────────────────────────────────────────
 
-describe("scan — PII", () => {
-  it("detects an email address", () => {
-    const findings = scan("contact: user@example.com");
-    expect(findings.some((f) => f.ruleId === "pii-email")).toBe(true);
+// FORK (gladstomych): the PII rule set is intentionally empty; this canary
+// guards secrets only. See the note in rules.ts. These tests pin that choice
+// so an upstream merge cannot quietly reintroduce the rules.
+describe("scan — PII removed", () => {
+  it("ships no pii-category rules", () => {
+    expect(RULES.some((r) => r.category === "pii")).toBe(false);
   });
 
-  it("detects a valid credit card number — no separators", () => {
-    const findings = scan("card: 4111111111111111");
-    expect(findings.some((f) => f.ruleId === "pii-credit-card")).toBe(true);
+  it("does not flag emails, private IPs, cards, SSNs, or phone numbers", () => {
+    const text =
+      "contact: user@example.com server: 192.168.1.100 card: 4111111111111111 " +
+      "ssn: 123-45-6789 tel: 03-1234-5678 call: (555) 123-4567 address: 〒150-0001";
+    expect(scan(text)).toHaveLength(0);
+  });
+});
+
+// ── scan: excludeRuleIds ──────────────────────────────────────────────────────
+
+describe("scan — excludeRuleIds", () => {
+  it("skips rules named in excludeRuleIds", () => {
+    const key = "AKIAIOSFODNN7EXAMPLE";
+    expect(scan(key).some((f) => f.ruleId === "aws-access-key")).toBe(true);
+    expect(scan(key, new Set(["aws-access-key"]))).toHaveLength(0);
   });
 
-  it("detects a valid credit card number — space separated", () => {
-    const findings = scan("card: 4111 1111 1111 1111");
-    expect(findings.some((f) => f.ruleId === "pii-credit-card")).toBe(true);
-  });
-
-  it("detects a valid credit card number — hyphen separated", () => {
-    const findings = scan("card: 4111-1111-1111-1111");
-    expect(findings.some((f) => f.ruleId === "pii-credit-card")).toBe(true);
-  });
-
-  it("does not flag an invalid credit card number", () => {
-    const findings = scan("card: 4111111111111112");
-    expect(findings.some((f) => f.ruleId === "pii-credit-card")).toBe(false);
-  });
-
-  it("detects a US SSN", () => {
-    const findings = scan("ssn: 123-45-6789");
-    expect(findings.some((f) => f.ruleId === "pii-ssn")).toBe(true);
-  });
-
-  it("does not flag an SSN with area 000", () => {
-    expect(scan("ssn: 000-45-6789").some((f) => f.ruleId === "pii-ssn")).toBe(
-      false,
-    );
-  });
-
-  it("does not flag an SSN with area 666", () => {
-    expect(scan("ssn: 666-45-6789").some((f) => f.ruleId === "pii-ssn")).toBe(
-      false,
-    );
-  });
-
-  it("does not flag an SSN with area 9xx", () => {
-    expect(scan("ssn: 900-45-6789").some((f) => f.ruleId === "pii-ssn")).toBe(
-      false,
-    );
-  });
-
-  it("does not flag an SSN with group 00", () => {
-    expect(scan("ssn: 123-00-6789").some((f) => f.ruleId === "pii-ssn")).toBe(
-      false,
-    );
-  });
-
-  it("does not flag an SSN with serial 0000", () => {
-    expect(scan("ssn: 123-45-0000").some((f) => f.ruleId === "pii-ssn")).toBe(
-      false,
-    );
-  });
-
-  it("detects a US phone number", () => {
-    const findings = scan("call: (555) 123-4567");
-    expect(findings.some((f) => f.ruleId === "pii-phone-us")).toBe(true);
-  });
-
-  it("detects a Japanese phone number", () => {
-    const findings = scan("tel: 03-1234-5678");
-    expect(findings.some((f) => f.ruleId === "pii-phone-jp")).toBe(true);
-  });
-
-  it("detects a Japanese postal code with 〒 prefix", () => {
-    const findings = scan("address: 〒150-0001");
-    expect(findings.some((f) => f.ruleId === "pii-postal-jp")).toBe(true);
-  });
-
-  it("does not flag a postal-like number without 〒", () => {
-    const findings = scan("zip: 150-0001");
-    expect(findings.some((f) => f.ruleId === "pii-postal-jp")).toBe(false);
-  });
-
-  it("detects a 192.168.x.x private IPv4 address", () => {
-    const findings = scan("server: 192.168.1.100");
-    expect(findings.some((f) => f.ruleId === "pii-ipv4")).toBe(true);
-  });
-
-  it("detects a 10.x.x.x private IPv4 address", () => {
-    const findings = scan("server: 10.0.0.1");
-    expect(findings.some((f) => f.ruleId === "pii-ipv4")).toBe(true);
-  });
-
-  it("detects a 172.16–31.x.x private IPv4 address", () => {
-    expect(scan("host: 172.16.0.1").some((f) => f.ruleId === "pii-ipv4")).toBe(
-      true,
-    );
+  it("leaves other rules active", () => {
+    const key = "AKIAIOSFODNN7EXAMPLE";
     expect(
-      scan("host: 172.31.255.255").some((f) => f.ruleId === "pii-ipv4"),
+      scan(key, new Set(["gcp-api-key"])).some(
+        (f) => f.ruleId === "aws-access-key",
+      ),
     ).toBe(true);
-  });
-
-  it("does not flag 172.15.x.x (outside private range)", () => {
-    expect(scan("host: 172.15.1.1").some((f) => f.ruleId === "pii-ipv4")).toBe(
-      false,
-    );
-  });
-
-  it("does not flag 172.32.x.x (outside private range)", () => {
-    expect(scan("host: 172.32.1.1").some((f) => f.ruleId === "pii-ipv4")).toBe(
-      false,
-    );
-  });
-
-  it("does not flag a public IPv4 address", () => {
-    const findings = scan("server: 8.8.8.8");
-    expect(findings.some((f) => f.ruleId === "pii-ipv4")).toBe(false);
   });
 });
