@@ -3,11 +3,45 @@
 [![CI](https://github.com/coo-quack/sensitive-canary/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/coo-quack/sensitive-canary/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A security plugin that prevents unintended data leaks from Claude Code. Automatically detects and blocks secrets and PII — in prompts, file reads, and command executions — before they are sent to the Anthropic API.
+A security plugin that prevents unintended data leaks from Claude Code. Automatically detects and blocks secrets — in prompts, file reads, and command executions — before they are sent to the Anthropic API.
 
 No proxy server. No background process. Native Claude Code hooks only.
 
 📖 **[Documentation](https://coo-quack.github.io/sensitive-canary/)** — Installation guide, detection rules reference, and allow tag details.
+
+---
+
+## About this fork
+
+This is [gladstomych](https://github.com/gladstomych)'s **secrets-only** fork of
+[coo-quack/sensitive-canary](https://github.com/coo-quack/sensitive-canary),
+tuned for context hygiene: block what would echo real secrets into the
+conversation, never block scripts that merely *use* credentials. Differences
+from upstream:
+
+- **All PII rules removed** (email, US/JP phone, SSN, credit card, JP postal,
+  private IPv4). They flagged routine dev data far more often than real leaks.
+  The `[allow-pii]`/`[mask-pii]` tag plumbing remains for compatibility.
+- **`$VAR` env-value checks apply only to `echo`/`printf` segments**, so
+  `curl -H "x: $TOKEN"` and `API_KEY=$KEY python app.py` pass; `echo $TOKEN`
+  still blocks.
+- **Bash command text skips the generic `env-assignment`/`generic-secret`
+  rules** (they fire on grep patterns and `TOKEN=$(...)` captures) and skips
+  connection strings whose credentialed URLs all point at
+  `localhost`/`127.0.0.1`. Specific token formats still block everywhere.
+- **`.env.example`/`.env.sample`/`.env.template` skip the `.env` name block**;
+  their contents are still scanned.
+- File contents read into the conversation keep the full secret rule set.
+
+Install this fork (the repo is its own marketplace):
+
+```bash
+claude plugin marketplace add gladstomych/sensitive-canary
+claude plugin install sensitive-canary@gladstomych
+```
+
+The rest of this README is upstream documentation; PII-related passages
+describe rules this fork does not ship.
 
 ---
 
@@ -21,11 +55,10 @@ Claude Code is a powerful development tool, but file reads and command execution
 |--------------------------|----------------------|
 | `cat .env` → full contents sent to Claude ❌ | Blocked by name before Claude reads it ✅ |
 | Paste `AKIAIOSFODNN7EXAMPLE` in prompt ❌ | Blocked before the API call is made ✅ |
-| Tool result contains user@email.com ❌ | PII detected and blocked ✅ |
 | `echo $API_KEY` with live key ❌ | Env var value scanned and blocked ✅ |
 
 - **Two hooks** — `UserPromptSubmit` and `PreToolUse` cover both directions of risk
-- **31 detection rules** — sourced from gitleaks and TruffleHog detector definitions
+- **24 detection rules** (secrets only in this fork) — sourced from gitleaks and TruffleHog detector definitions
 - **Entropy filtering** — reduces false positives on low-entropy values
 - **Luhn validation** — credit card numbers are validated, not just pattern-matched
 - **Local only** — all scanning runs in your terminal; nothing is sent anywhere
@@ -43,24 +76,31 @@ Claude Code is a powerful development tool, but file reads and command execution
 
 Install in two commands from inside a Claude Code session:
 
-**1. Register the marketplace**
+**1. Register the marketplace** (this repo is its own marketplace)
 
 ```
-/plugin marketplace add coo-quack/claude-code-marketplace
+/plugin marketplace add gladstomych/sensitive-canary
 ```
 
 **2. Install the plugin**
 
 ```
-/plugin install sensitive-canary@coo-quack
+/plugin install sensitive-canary@gladstomych
 ```
 
 Done. The hooks are enabled automatically.
+
+To install the original instead, use upstream's marketplace:
+`/plugin marketplace add coo-quack/claude-code-marketplace` then
+`/plugin install sensitive-canary@coo-quack`.
 
 > **Keeping up to date:** Third-party marketplaces have auto-update disabled by default. To receive automatic updates, run `/plugin` → **Marketplaces** tab → select the marketplace → **Enable auto-update**. You can also update manually from the same tab. See [Discover and install plugins](https://docs.anthropic.com/en/docs/claude-code/discover-plugins) for details.
 
 <details>
 <summary>npm install</summary>
+
+> **Note:** the npm package is upstream's build and does not include this
+> fork's changes. Prefer the plugin install above.
 
 Install locally via npm and configure hooks manually:
 
@@ -259,17 +299,10 @@ To intentionally bypass a block, include the appropriate tag in your **current p
 | `env-assignment` | `.env`-style secret assignment *(entropy ≥ 3.0)* |
 | `connection-string` | Database connection string with embedded credentials |
 
-### PII (7 rules)
+### PII (removed in this fork)
 
-| Rule ID | Description | Validation |
-|---|---|---|
-| `pii-email` | Email address | — |
-| `pii-credit-card` | Credit card number | Luhn check |
-| `pii-ssn` | US Social Security Number | Invalid prefix exclusion |
-| `pii-phone-us` | US phone number | — |
-| `pii-phone-jp` | Japanese phone number | — |
-| `pii-postal-jp` | Japanese postal code (`〒` prefix required) | — |
-| `pii-ipv4` | IPv4 address (RFC 1918 private ranges only) | — |
+Upstream ships 7 PII rules (email, credit card, SSN, US/JP phone, JP postal,
+private IPv4). This fork removes all of them; see "About this fork" above.
 
 Detection patterns are based on rule definitions from [gitleaks](https://github.com/gitleaks/gitleaks) and [TruffleHog](https://github.com/trufflesecurity/trufflehog).
 
