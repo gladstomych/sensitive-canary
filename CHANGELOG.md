@@ -1,3 +1,38 @@
+## v0.6.1 (2026-07-29)
+
+### Fixed
+
+- Stop blocking reads of files that contain no credential. `generic-secret`,
+  `env-assignment` and `connection-string` matched the *shape* of an assignment
+  without checking whether the value was a literal secret, so a Python attribute
+  reference, a compose-file interpolation and a CI placeholder all blocked.
+- Entropy could not fix this: `settings.anthropic_api_key` scores 3.87 while a
+  real random 24-char password scores 3.86, so no threshold separates them. The
+  new `isNonLiteralValue()` filters on structure instead: references (`$VAR`,
+  `${VAR:-default}`, `settings.x`, `process.env.X`, `{{ x }}`, `<YOUR_KEY>`) and
+  a closed placeholder word list. Opt-in per rule via `skipNonLiteralValues`, so
+  the specific token formats are untouched.
+- Every pattern is anchored, which is a security property: `changeme` is exempt
+  but `changeme-8Kd93mZq...` is not, so a real credential cannot be laundered by
+  prefixing it with a placeholder word.
+- `connection-string` now captures the password as group 3 rather than treating
+  the whole URL as the secret, so an interpolated password can be recognised. No
+  entropy gate was added on purpose: it would exempt `admin:admin@db.prod`, a
+  weak but real credential.
+- `isLocalConnectionString` rewritten to re-match the URL and compare the
+  captured host. It previously scanned forward from `indexOf(secretValue)`, which
+  breaks once the password alone is the secret, and it now fails closed instead
+  of exempting a credential it cannot locate.
+
+### Notes
+
+- `password`, `passwd`, `secret`, `admin` and `postgres` are deliberately not
+  treated as placeholders. They read like stand-ins but are common real weak
+  credentials.
+- 55 new tests (222 total, was 167).
+
+---
+
 ## v0.5.2 (2026-03-31)
 
 ### Security

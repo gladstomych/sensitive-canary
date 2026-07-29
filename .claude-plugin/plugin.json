@@ -1,7 +1,7 @@
 {
   "name": "sensitive-canary",
   "description": "Blocks secrets before they reach the Anthropic API. Fork of coo-quack/sensitive-canary: PII rules removed (secrets only), command-text and $VAR checks relaxed to echo-into-context patterns.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "author": {
     "name": "coo-quack"
   },
