@@ -167,7 +167,11 @@ function extractFilePathsFromCommand(command: string): string[] {
 // FORK (gladstomych): placeholder files (.env.example and friends) carry no real
 // secrets by convention and are how a project documents its config surface, so
 // they skip the name block. Content scanning still applies to them.
-const ENV_NAME_EXEMPT = new Set([".env.example", ".env.sample", ".env.template"]);
+const ENV_NAME_EXEMPT = new Set([
+  ".env.example",
+  ".env.sample",
+  ".env.template",
+]);
 
 function isBlockedEnvFile(filePath: string): boolean {
   if (!filePath) return false;
@@ -180,17 +184,31 @@ function isBlockedEnvFile(filePath: string): boolean {
 // plumbing (postgres://postgres:postgres@localhost/db), not leaks. Command
 // text only; file contents keep the full rule. The lookahead stops
 // localhost.evil.com from passing as local.
-const LOCAL_HOST_RE = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?=[:/\s]|$)/;
+const LOCAL_HOST_RE =
+  /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?=[:/\s]|$)/;
+
+// Matches the same shape as the connection-string rule, capturing password + host
+// so a finding can be tied back to the URL it came from.
+const CONNECTION_URL_RE =
+  /(?:mongodb|mysql|postgres|postgresql|redis):\/\/[^:\s]+:([^@\s]+)@([^\s/,;'"`)\]}]+)/g;
 
 function isLocalConnectionString(command: string, finding: Finding): boolean {
   if (finding.ruleId !== "connection-string") return false;
-  let idx = command.indexOf(finding.secretValue);
-  while (idx !== -1) {
-    const after = command.slice(idx + finding.secretValue.length);
-    if (!LOCAL_HOST_RE.test(after)) return false;
-    idx = command.indexOf(finding.secretValue, idx + finding.secretValue.length);
+  // LOCAL PATCH: the rule now reports the password alone as secretValue, not the
+  // scheme+user+password prefix. Scanning forward from indexOf(secretValue) no
+  // longer works — for the canonical postgres:postgres@localhost case the
+  // password also occurs as the scheme and as the user, so the first hit is
+  // followed by "://..." and the exemption was lost. Re-match the URL shape and
+  // compare against the captured host instead.
+  let matched = false;
+  for (const m of command.matchAll(CONNECTION_URL_RE)) {
+    if (m[1] !== finding.secretValue) continue; // a different credential
+    matched = true;
+    if (!LOCAL_HOST_RE.test(m[2] ?? "")) return false;
   }
-  return true;
+  // Fail closed: if the credential cannot be tied to a URL we can inspect, do not
+  // exempt it. The previous indexOf form returned true in that case.
+  return matched;
 }
 
 // ── Output helpers ────────────────────────────────────────────────────────────
