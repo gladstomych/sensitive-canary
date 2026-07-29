@@ -384,23 +384,18 @@ describe("pre-tool-use-hook — Bash tool (command string)", () => {
 // ── Bash tool — file-reading command blocking ─────────────────────────────────
 
 describe("pre-tool-use-hook — Bash tool (file-reading commands)", () => {
-  it.each([
-    "cat",
-    "head",
-    "tail",
-    "less",
-    "more",
-    "bat",
-    "nl",
-  ])("blocks %s on a file with secrets", (cmd) => {
-    const p = writeFixture(
-      `creds-${cmd}.txt`,
-      "AWS_KEY=AKIAIOSFODNN7EXAMPLE\n",
-    );
-    const { exitCode, decision } = runBashHook(`${cmd} ${p}`);
-    expect(exitCode).toBe(2);
-    expect(decision).toBe("block");
-  });
+  it.each(["cat", "head", "tail", "less", "more", "bat", "nl"])(
+    "blocks %s on a file with secrets",
+    (cmd) => {
+      const p = writeFixture(
+        `creds-${cmd}.txt`,
+        "AWS_KEY=AKIAIOSFODNN7EXAMPLE\n",
+      );
+      const { exitCode, decision } = runBashHook(`${cmd} ${p}`);
+      expect(exitCode).toBe(2);
+      expect(decision).toBe("block");
+    },
+  );
 
   // FORK (gladstomych): the PII rules are gone; ex-PII content passes.
   it("passes cat on a file with only ex-PII content", () => {

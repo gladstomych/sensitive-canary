@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entropy, luhn, redact, RULES, scan } from "../rules.ts";
+import { entropy, luhn, RULES, redact, scan } from "../rules.ts";
 
 // ── luhn ──────────────────────────────────────────────────────────────────────
 

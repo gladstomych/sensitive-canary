@@ -38,7 +38,6 @@ describe("user-prompt-submit-hook — allow (exit 0)", () => {
     );
     expect(exitCode).toBe(0);
   });
-
 });
 
 describe("user-prompt-submit-hook — block (exit 2)", () => {
@@ -82,7 +81,6 @@ describe("user-prompt-submit-hook — block (exit 2)", () => {
     const { exitCode } = runHook("[allow-pii] my key is AKIAIOSFODNN7EXAMPLE");
     expect(exitCode).toBe(2);
   });
-
 });
 
 describe("user-prompt-submit-hook — [mask-xxx] tags", () => {
